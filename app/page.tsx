@@ -311,7 +311,7 @@ export default function Home() {
             ))}
           </div>
           <div className="border-t border-gray-100 pt-6 flex flex-col md:flex-row justify-between items-center gap-2">
-            <p className="text-xs text-gray-400">© 2025 Thriftly. Made with ❤️ in India 🇮🇳 for the World 🌍</p>
+            <p className="text-xs text-gray-400">© 2026 Thriftly. Made with ❤️ in India 🇮🇳 for the World 🌍</p>
             <div className="flex gap-4">
               <Link href="/privacy" className="text-xs text-gray-400 hover:text-emerald-700">Privacy Policy</Link>
               <Link href="/terms" className="text-xs text-gray-400 hover:text-emerald-700">Terms of Service</Link>
