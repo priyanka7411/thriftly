@@ -1,36 +1,150 @@
+"use client";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
-
-
-const cartItems = [
-  { id: 1, name: "Banarasi Silk Saree", price: 1200, original: 4500, emoji: "🥻", seller: "ethnic_finds", condition: "Like New" },
-  { id: 3, name: "Nike Air Max 90", price: 3500, original: 9000, emoji: "👟", seller: "sneaker_vault", condition: "Like New" },
-  { id: 9, name: "Harry Potter Box Set", price: 550, original: 1800, emoji: "📚", seller: "bookworm99", condition: "Good" },
-];
-
-const subtotal = cartItems.reduce((sum, i) => sum + i.price, 0);
-const savings = cartItems.reduce((sum, i) => sum + (i.original - i.price), 0);
-const shipping = 0;
-const total = subtotal + shipping;
+import { useState } from "react";
+import { useCart } from "@/context/CartContext";
+import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 export default function Checkout() {
+  const { items, totalPrice, clearCart } = useCart();
+  const router = useRouter();
+  const savings = items.reduce((sum, i) => sum + (i.original - i.price) * i.quantity, 0);
+  const shipping = totalPrice >= 999 ? 0 : 99;
+  const total = totalPrice + shipping;
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // Form state
+  const [form, setForm] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    address1: "",
+    address2: "",
+    city: "",
+    state: "Karnataka",
+    pin: "",
+    country: "India",
+    delivery: "standard",
+    payment: "card",
+    cardNumber: "",
+    expiry: "",
+    cvv: "",
+    cardName: "",
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handlePlaceOrder = async () => {
+    // Validate
+    if (!form.firstName || !form.email || !form.address1 || !form.city || !form.pin) {
+      setError("Please fill in all required fields!");
+      return;
+    }
+
+    if (items.length === 0) {
+      setError("Your cart is empty!");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
+
+      // Create order in Supabase
+      const { data: order, error: orderError } = await supabase
+        .from("orders")
+        .insert({
+          buyer_id: user?.id || null,
+          total_amount: total,
+          shipping_address: shippingAddress,
+          payment_method: form.payment,
+          payment_status: "paid",
+          delivery_status: "processing",
+        })
+        .select()
+        .single();
+
+      if (orderError) throw orderError;
+
+      // Create order items
+      const orderItems = items.map(item => ({
+        order_id: order.id,
+        product_id: item.id,
+        quantity: item.quantity,
+        price: item.price,
+      }));
+
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(orderItems);
+
+      if (itemsError) throw itemsError;
+
+      // Clear cart
+      clearCart();
+
+      // Redirect to confirmation with order ID
+      router.push(`/order-confirmation?orderId=${order.id}&total=${total}&email=${form.email}`);
+
+    } catch (err: any) {
+      setError("Something went wrong. Please try again.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (items.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50 font-sans">
+        <header className="bg-white border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-sm font-black">T</div>
+              <span className="text-xl font-black text-gray-900">Thriftly</span>
+            </Link>
+            <span className="text-xs text-emerald-600 font-semibold">🔒 Secure Checkout</span>
+          </div>
+        </header>
+        <div className="max-w-2xl mx-auto px-6 py-24 text-center">
+          <div className="text-6xl mb-4">🛒</div>
+          <h2 className="text-2xl font-black text-gray-900 mb-2">Your cart is empty</h2>
+          <Link href="/browse">
+            <button className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition mt-4">
+              Browse Items
+            </button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
 
-      {/* Navbar — minimal for checkout */}
+      {/* Minimal Navbar */}
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-sm font-black">T</div>
             <span className="text-xl font-black text-gray-900">Thriftly</span>
           </Link>
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <span className="text-emerald-600 font-bold">🔒 Secure Checkout</span>
-          </div>
+          <span className="text-xs text-emerald-600 font-semibold">🔒 Secure Checkout</span>
         </div>
       </header>
 
-      {/* Checkout Steps */}
+      {/* Steps */}
       <div className="bg-white border-b border-gray-100 py-4">
         <div className="max-w-4xl mx-auto px-6">
           <div className="flex items-center justify-center gap-2">
@@ -54,6 +168,14 @@ export default function Checkout() {
         </div>
       </div>
 
+      {error && (
+        <div className="max-w-5xl mx-auto px-6 pt-4">
+          <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl font-medium">
+            ⚠️ {error}
+          </div>
+        </div>
+      )}
+
       <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
 
@@ -62,33 +184,23 @@ export default function Checkout() {
 
             {/* Contact Info */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-base font-black text-gray-900">Contact Information</h2>
-                <span className="text-xs text-emerald-600 font-semibold cursor-pointer hover:underline">Login for faster checkout</span>
-              </div>
+              <h2 className="text-base font-black text-gray-900 mb-5">Contact Information</h2>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">First Name</label>
-                  <input type="text" placeholder="Priya" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
+                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">First Name *</label>
+                  <input name="firstName" value={form.firstName} onChange={handleChange} placeholder="Priya" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-gray-600 mb-1.5 block">Last Name</label>
-                  <input type="text" placeholder="Sharma" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
+                  <input name="lastName" value={form.lastName} onChange={handleChange} placeholder="Sharma" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Email</label>
-                  <input type="email" placeholder="you@example.com" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
+                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Email *</label>
+                  <input name="email" value={form.email} onChange={handleChange} type="email" placeholder="you@example.com" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Phone Number</label>
-                  <div className="flex gap-2">
-                    <select className="border border-gray-200 rounded-xl px-2 py-3 text-sm outline-none focus:border-emerald-500 bg-white text-gray-700">
-                      <option>🇮🇳 +91</option>
-                      <option>🇺🇸 +1</option>
-                      <option>🇬🇧 +44</option>
-                    </select>
-                    <input type="tel" placeholder="98765 43210" className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
-                  </div>
+                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Phone</label>
+                  <input name="phone" value={form.phone} onChange={handleChange} placeholder="98765 43210" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition" />
                 </div>
               </div>
             </div>
@@ -98,48 +210,41 @@ export default function Checkout() {
               <h2 className="text-base font-black text-gray-900 mb-5">Delivery Address</h2>
               <div className="space-y-4">
                 <div>
-                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Address Line 1</label>
-                  <input type="text" placeholder="House no, Street name" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
+                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Address Line 1 *</label>
+                  <input name="address1" value={form.address1} onChange={handleChange} placeholder="House no, Street name" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Address Line 2 (Optional)</label>
-                  <input type="text" placeholder="Apartment, area, landmark" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition" />
+                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Address Line 2</label>
+                  <input name="address2" value={form.address2} onChange={handleChange} placeholder="Apartment, area, landmark" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">City</label>
-                    <input type="text" placeholder="Mumbai" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition" />
+                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">City *</label>
+                    <input name="city" value={form.city} onChange={handleChange} placeholder="Mumbai" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition" />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-gray-600 mb-1.5 block">State</label>
-                    <select className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 bg-white text-gray-700">
-                      <option>Select state</option>
-                      {["Maharashtra", "Karnataka", "Tamil Nadu", "Delhi", "Gujarat", "Rajasthan", "West Bengal", "Telangana", "Kerala", "Uttar Pradesh"].map(s => (
+                    <select name="state" value={form.state} onChange={handleChange} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 bg-white">
+                      {["Karnataka", "Maharashtra", "Tamil Nadu", "Delhi", "Gujarat", "Rajasthan", "West Bengal", "Telangana", "Kerala", "Uttar Pradesh"].map(s => (
                         <option key={s}>{s}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">PIN Code</label>
-                    <input type="text" placeholder="400001" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition" />
+                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">PIN Code *</label>
+                    <input name="pin" value={form.pin} onChange={handleChange} placeholder="400001" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition" />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-gray-600 mb-1.5 block">Country</label>
-                    <select className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 bg-white text-gray-700">
-                      <option>🇮🇳 India</option>
-                      <option>🇺🇸 United States</option>
-                      <option>🇬🇧 United Kingdom</option>
-                      <option>🇦🇺 Australia</option>
-                      <option>🇨🇦 Canada</option>
+                    <select name="country" value={form.country} onChange={handleChange} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 bg-white">
+                      <option>India</option>
+                      <option>United States</option>
+                      <option>United Kingdom</option>
+                      <option>Australia</option>
+                      <option>Canada</option>
                     </select>
                   </div>
                 </div>
-
-                {/* Save address checkbox */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" defaultChecked className="w-4 h-4 accent-emerald-600" />
-                  <span className="text-xs text-gray-500">Save this address for future orders</span>
-                </label>
               </div>
             </div>
 
@@ -148,12 +253,12 @@ export default function Checkout() {
               <h2 className="text-base font-black text-gray-900 mb-4">Delivery Method</h2>
               <div className="space-y-3">
                 {[
-                  { id: "standard", label: "Standard Delivery", time: "5–7 business days", price: "FREE", badge: "🎉 Free", selected: true },
-                  { id: "express", label: "Express Delivery", time: "2–3 business days", price: "₹149", badge: null, selected: false },
-                  { id: "overnight", label: "Overnight Delivery", time: "Next business day", price: "₹299", badge: "⚡ Fast", selected: false },
+                  { id: "standard", label: "Standard Delivery", time: "5–7 business days", price: "FREE", badge: "🎉 Free" },
+                  { id: "express", label: "Express Delivery", time: "2–3 business days", price: "₹149", badge: null },
+                  { id: "overnight", label: "Overnight Delivery", time: "Next business day", price: "₹299", badge: "⚡ Fast" },
                 ].map((method) => (
-                  <label key={method.id} className={`flex items-center gap-4 p-4 rounded-2xl border-2 cursor-pointer transition ${method.selected ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:border-emerald-300"}`}>
-                    <input type="radio" name="delivery" defaultChecked={method.selected} className="w-4 h-4 accent-emerald-600" />
+                  <label key={method.id} className={`flex items-center gap-4 p-4 rounded-2xl border-2 cursor-pointer transition ${form.delivery === method.id ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:border-emerald-300"}`}>
+                    <input type="radio" name="delivery" value={method.id} checked={form.delivery === method.id} onChange={handleChange} className="w-4 h-4 accent-emerald-600" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-bold text-gray-900">{method.label}</p>
@@ -172,46 +277,49 @@ export default function Checkout() {
               <h2 className="text-base font-black text-gray-900 mb-4">Payment Method</h2>
               <div className="space-y-3 mb-5">
                 {[
-                  { id: "card", label: "Credit / Debit Card", icon: "💳", selected: true },
-                  { id: "upi", label: "UPI (GPay, PhonePe, Paytm)", icon: "📱", selected: false },
-                  { id: "netbanking", label: "Net Banking", icon: "🏦", selected: false },
-                  { id: "cod", label: "Cash on Delivery", icon: "💵", selected: false },
+                  { id: "card", label: "Credit / Debit Card", icon: "💳" },
+                  { id: "upi", label: "UPI (GPay, PhonePe, Paytm)", icon: "📱" },
+                  { id: "netbanking", label: "Net Banking", icon: "🏦" },
+                  { id: "cod", label: "Cash on Delivery", icon: "💵" },
                 ].map((method) => (
-                  <label key={method.id} className={`flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition ${method.selected ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:border-emerald-300"}`}>
-                    <input type="radio" name="payment" defaultChecked={method.selected} className="w-4 h-4 accent-emerald-600" />
+                  <label key={method.id} className={`flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition ${form.payment === method.id ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:border-emerald-300"}`}>
+                    <input type="radio" name="payment" value={method.id} checked={form.payment === method.id} onChange={handleChange} className="w-4 h-4 accent-emerald-600" />
                     <span className="text-lg">{method.icon}</span>
                     <span className="text-sm font-bold text-gray-800">{method.label}</span>
                   </label>
                 ))}
               </div>
 
-              {/* Card Form */}
-              <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Card Number</label>
-                  <input type="text" placeholder="1234  5678  9012  3456" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+              {form.payment === "card" && (
+                <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">Expiry Date</label>
-                    <input type="text" placeholder="MM / YY" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
+                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">Card Number</label>
+                    <input name="cardNumber" value={form.cardNumber} onChange={handleChange} placeholder="1234  5678  9012  3456" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-gray-600 mb-1.5 block">Expiry Date</label>
+                      <input name="expiry" value={form.expiry} onChange={handleChange} placeholder="MM / YY" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-600 mb-1.5 block">CVV</label>
+                      <input name="cvv" value={form.cvv} onChange={handleChange} type="password" placeholder="•••" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
+                    </div>
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">CVV</label>
-                    <input type="password" placeholder="•••" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
+                    <label className="text-xs font-bold text-gray-600 mb-1.5 block">Name on Card</label>
+                    <input name="cardName" value={form.cardName} onChange={handleChange} placeholder="Priya Sharma" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">Name on Card</label>
-                  <input type="text" placeholder="Priya Sharma" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
-                </div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 accent-emerald-600" />
-                  <span className="text-xs text-gray-500">Save card for future payments</span>
-                </label>
-              </div>
-            </div>
+              )}
 
+              {form.payment === "upi" && (
+                <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                  <label className="text-xs font-bold text-gray-600 mb-1.5 block">UPI ID</label>
+                  <input placeholder="yourname@upi" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-emerald-500 transition bg-white" />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right — Order Summary */}
@@ -221,14 +329,14 @@ export default function Checkout() {
 
               {/* Items */}
               <div className="space-y-3 mb-4 max-h-52 overflow-y-auto">
-                {cartItems.map((item) => (
+                {items.map((item) => (
                   <div key={item.id} className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-xl shrink-0">{item.emoji}</div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-gray-800 truncate">{item.name}</p>
-                      <p className="text-xs text-gray-400">@{item.seller}</p>
+                      <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
                     </div>
-                    <span className="text-xs font-black text-emerald-700 shrink-0">₹{item.price.toLocaleString()}</span>
+                    <span className="text-xs font-black text-emerald-700 shrink-0">₹{(item.price * item.quantity).toLocaleString()}</span>
                   </div>
                 ))}
               </div>
@@ -236,7 +344,7 @@ export default function Checkout() {
               <div className="border-t border-gray-100 pt-4 space-y-2.5 mb-4">
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">Subtotal</span>
-                  <span className="text-sm font-semibold">₹{subtotal.toLocaleString()}</span>
+                  <span className="text-sm font-semibold">₹{totalPrice.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">Savings</span>
@@ -244,7 +352,9 @@ export default function Checkout() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">Shipping</span>
-                  <span className="text-sm font-bold text-emerald-600">FREE 🎉</span>
+                  <span className={`text-sm font-bold ${shipping === 0 ? "text-emerald-600" : "text-gray-900"}`}>
+                    {shipping === 0 ? "FREE 🎉" : `₹${shipping}`}
+                  </span>
                 </div>
               </div>
 
@@ -256,24 +366,19 @@ export default function Checkout() {
                 <p className="text-xs text-emerald-600 font-semibold mt-1">You're saving ₹{savings.toLocaleString()}! 🎉</p>
               </div>
 
-              {/* Place Order */}
-              <button className="w-full bg-emerald-600 text-white py-4 rounded-2xl text-sm font-black hover:bg-emerald-700 transition shadow-sm shadow-emerald-100 mb-3">
-                🔒 Place Order — ₹{total.toLocaleString()}
+              <button
+                onClick={handlePlaceOrder}
+                disabled={loading}
+                className="w-full bg-emerald-600 text-white py-4 rounded-2xl text-sm font-black hover:bg-emerald-700 transition shadow-sm mb-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Placing Order..." : `🔒 Place Order — ₹${total.toLocaleString()}`}
               </button>
 
-              <p className="text-center text-xs text-gray-400 mb-4">
-                By placing this order you agree to our{" "}
-                <a href="#" className="text-emerald-600 hover:underline">Terms</a> &{" "}
-                <a href="#" className="text-emerald-600 hover:underline">Refund Policy</a>
-              </p>
-
-              {/* Trust */}
               <div className="bg-gray-50 rounded-xl p-3 space-y-1.5 border border-gray-100">
                 {["🔒 256-bit SSL Encryption", "✅ Verified Seller", "↩️ 7-day Return Policy", "💬 24/7 Support"].map(t => (
                   <p key={t} className="text-xs text-gray-500">{t}</p>
                 ))}
               </div>
-
             </div>
           </div>
         </div>
