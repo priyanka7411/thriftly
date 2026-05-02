@@ -2,55 +2,24 @@
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
 import { useCart } from "@/context/CartContext";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-const product = {
-  id: 1,
-  name: "Banarasi Silk Saree",
-  price: "₹1,200",
-  priceNum: 1200,
-  original: "₹4,500",
-  originalNum: 4500,
-  tag: "73% off",
-  condition: "Like New",
-  seller: "ethnic_finds",
-  sellerName: "Ethnic Finds Store",
-  sellerRating: 4.9,
-  sellerSales: 134,
-  location: "🇮🇳 Varanasi",
-  category: "Ethnic Wear",
-  emoji: "🥻",
-  rating: 4.9,
-  reviews: 38,
-  views: 214,
-  stock: "2 left",
-  urgency: "🔥 Trending",
-  description: "Beautiful handwoven Banarasi silk saree in a rich maroon and gold combination. Worn only once for a family event. Comes with original blouse piece. Perfect for weddings, festivals, or special occasions.",
-  details: [
-    ["Fabric", "Pure Silk"],
-    ["Color", "Maroon & Gold"],
-    ["Size", "6.3 meters"],
-    ["Blouse Piece", "Included"],
-    ["Occasion", "Wedding, Festival"],
-    ["Condition", "Like New — worn once"],
-    ["Listed", "2 days ago"],
-  ],
-  images: ["🥻", "✨", "🪡", "💎"],
-};
-
-const relatedProducts = [
-  { id: 6, name: "Kurta Set XL", price: "₹450", original: "₹1,200", emoji: "👘", rating: 4.5, condition: "Good", tag: "62% off" },
-  { id: 2, name: "Vintage Denim Jacket", price: "₹899", original: "₹2,999", emoji: "🧥", rating: 4.7, condition: "Good", tag: "70% off" },
-  { id: 11, name: "Floral Kurti S/M", price: "₹320", original: "₹999", emoji: "👗", rating: 4.4, condition: "Good", tag: "68% off" },
-  { id: 8, name: "Leather Tote Bag", price: "₹1,100", original: "₹3,500", emoji: "👜", rating: 4.7, condition: "Like New", tag: "68% off" },
-];
-
-const reviews = [
-  { name: "Sneha R.", rating: 5, date: "2 weeks ago", text: "Absolutely gorgeous saree! Exactly as described. Fast shipping!", avatar: "S" },
-  { name: "Meera K.", rating: 5, date: "1 month ago", text: "Great quality silk, looks brand new. Very happy with this purchase!", avatar: "M" },
-  { name: "Pooja T.", rating: 4, date: "1 month ago", text: "Beautiful saree, slight delay in shipping but overall great.", avatar: "P" },
-];
+interface Product {
+  id: number;
+  name: string;
+  description: string;
+  price: number;
+  original_price: number;
+  condition: string;
+  category: string;
+  images: string[];
+  location: string;
+  views: number;
+  seller_id: string;
+  created_at: string;
+}
 
 const conditionStyle: Record<string, string> = {
   "Like New": "bg-emerald-50 text-emerald-700 border border-emerald-200",
@@ -61,6 +30,12 @@ const conditionStyle: Record<string, string> = {
 export default function ProductDetail() {
   const { addToCart } = useCart();
   const router = useRouter();
+  const params = useParams();
+  const id = params?.id;
+
+  const [product, setProduct] = useState<Product | null>(null);
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const [added, setAdded] = useState(false);
   const [wishlisted, setWishlisted] = useState(false);
   const [selectedImage, setSelectedImage] = useState(0);
@@ -69,15 +44,56 @@ export default function ProductDetail() {
   const [messageSent, setMessageSent] = useState(false);
   const [quantity, setQuantity] = useState(1);
 
+  useEffect(() => {
+    if (id) fetchProduct();
+  }, [id]);
+
+  const fetchProduct = async () => {
+    setLoading(true);
+
+    // Fetch product
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error || !data) {
+      setLoading(false);
+      return;
+    }
+
+    setProduct(data);
+
+    // Update view count
+    await supabase
+      .from("products")
+      .update({ views: (data.views || 0) + 1 })
+      .eq("id", id);
+
+    // Fetch related products
+    const { data: related } = await supabase
+      .from("products")
+      .select("*")
+      .eq("category", data.category)
+      .neq("id", id)
+      .eq("status", "active")
+      .limit(4);
+
+    if (related) setRelatedProducts(related);
+    setLoading(false);
+  };
+
   const handleAddToCart = () => {
+    if (!product) return;
     for (let i = 0; i < quantity; i++) {
       addToCart({
         id: product.id,
         name: product.name,
-        price: product.priceNum,
-        original: product.originalNum,
-        emoji: product.emoji,
-        seller: product.seller,
+        price: product.price,
+        original: product.original_price,
+        emoji: product.images?.[0] || "🛍️",
+        seller: product.seller_id || "seller",
         condition: product.condition,
       });
     }
@@ -97,6 +113,57 @@ export default function ProductDetail() {
     setTimeout(() => { setMessageSent(false); setShowMessage(false); }, 3000);
   };
 
+  const discountPercent = product
+    ? Math.round(((product.original_price - product.price) / product.original_price) * 100)
+    : 0;
+
+  // Loading skeleton
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 font-sans">
+        <Navbar />
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="flex flex-col md:flex-row gap-8 animate-pulse">
+            <div className="flex-1">
+              <div className="bg-gray-200 rounded-3xl h-96 mb-3"></div>
+              <div className="flex gap-3">
+                {Array(4).fill(0).map((_, i) => (
+                  <div key={i} className="flex-1 bg-gray-200 rounded-2xl h-20"></div>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 space-y-4">
+              <div className="bg-gray-200 h-6 rounded w-1/3"></div>
+              <div className="bg-gray-200 h-10 rounded w-2/3"></div>
+              <div className="bg-gray-200 h-24 rounded"></div>
+              <div className="bg-gray-200 h-12 rounded"></div>
+              <div className="bg-gray-200 h-12 rounded"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Product not found
+  if (!product) {
+    return (
+      <div className="min-h-screen bg-gray-50 font-sans">
+        <Navbar />
+        <div className="max-w-2xl mx-auto px-6 py-24 text-center">
+          <div className="text-6xl mb-4">😕</div>
+          <h2 className="text-2xl font-black text-gray-900 mb-2">Product not found</h2>
+          <p className="text-gray-400 text-sm mb-6">This item may have been sold or removed.</p>
+          <Link href="/browse">
+            <button className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition">
+              Browse Other Items
+            </button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
       <Navbar />
@@ -111,21 +178,24 @@ export default function ProductDetail() {
           <span>›</span>
           <Link href="/browse" className="hover:text-emerald-600">{product.category}</Link>
           <span>›</span>
-          <span className="text-gray-700 font-medium">{product.name}</span>
+          <span className="text-gray-700 font-medium truncate max-w-xs">{product.name}</span>
         </div>
 
-        {/* Main */}
+        {/* Main Product */}
         <div className="flex flex-col md:flex-row gap-8 mb-12">
 
           {/* Images */}
           <div className="flex-1">
             <div className="bg-white rounded-3xl border border-gray-200 h-96 flex items-center justify-center mb-3 relative overflow-hidden group">
-              <span className="text-9xl group-hover:scale-110 transition duration-300">{product.images[selectedImage]}</span>
-              <span className="absolute top-4 right-4 bg-red-500 text-white text-sm font-black px-3 py-1 rounded-xl">{product.tag}</span>
-              <span className="absolute top-4 left-4 bg-black/70 text-white text-xs font-semibold px-3 py-1 rounded-lg">{product.urgency}</span>
+              <span className="text-9xl group-hover:scale-110 transition duration-300">
+                {product.images?.[selectedImage] || "🛍️"}
+              </span>
+              <span className="absolute top-4 right-4 bg-red-500 text-white text-sm font-black px-3 py-1 rounded-xl">
+                {discountPercent}% off
+              </span>
             </div>
             <div className="flex gap-3">
-              {product.images.map((img, i) => (
+              {(product.images || ["🛍️"]).map((img, i) => (
                 <button
                   key={i}
                   onClick={() => setSelectedImage(i)}
@@ -140,38 +210,42 @@ export default function ProductDetail() {
           {/* Info */}
           <div className="flex-1 max-w-md">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full font-semibold">{product.category}</span>
-              <span className="text-xs text-orange-700 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-full font-semibold">⚠️ Only {product.stock}!</span>
+              <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full font-semibold">
+                {product.category}
+              </span>
             </div>
 
             <h1 className="text-2xl font-black text-gray-900 mb-2">{product.name}</h1>
 
             <div className="flex items-center gap-2 mb-4">
-              <div className="flex gap-0.5">
-                {Array(5).fill(0).map((_, i) => (
-                  <span key={i} className={`text-sm ${i < Math.floor(product.rating) ? "text-amber-400" : "text-gray-200"}`}>★</span>
-                ))}
-              </div>
-              <span className="text-sm font-bold text-gray-700">{product.rating}</span>
-              <span className="text-sm text-gray-400">({product.reviews} reviews)</span>
-              <span className="text-xs text-gray-300">·</span>
               <span className="text-xs text-gray-400">👁 {product.views} views</span>
+              <span className="text-xs text-gray-300">·</span>
+              <span className="text-xs text-gray-400">
+                Listed {new Date(product.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </span>
             </div>
 
+            {/* Price */}
             <div className="bg-gray-50 rounded-2xl p-4 mb-4 border border-gray-100">
               <div className="flex items-baseline gap-3 mb-1">
-                <span className="text-3xl font-black text-emerald-700">{product.price}</span>
-                <span className="text-lg text-gray-400 line-through">{product.original}</span>
-                <span className="bg-red-100 text-red-600 text-sm font-black px-2 py-0.5 rounded-lg">{product.tag}</span>
+                <span className="text-3xl font-black text-emerald-700">₹{product.price.toLocaleString()}</span>
+                <span className="text-lg text-gray-400 line-through">₹{product.original_price.toLocaleString()}</span>
+                <span className="bg-red-100 text-red-600 text-sm font-black px-2 py-0.5 rounded-lg">{discountPercent}% off</span>
               </div>
-              <p className="text-xs text-gray-400">You save <span className="text-emerald-700 font-bold">₹3,300</span>!</p>
+              <p className="text-xs text-gray-400">
+                You save <span className="text-emerald-700 font-bold">₹{(product.original_price - product.price).toLocaleString()}</span>!
+              </p>
             </div>
 
+            {/* Condition */}
             <div className="flex items-center gap-3 mb-3">
               <span className="text-sm font-semibold text-gray-600">Condition:</span>
-              <span className={`text-sm font-bold px-3 py-1 rounded-full ${conditionStyle[product.condition]}`}>{product.condition}</span>
+              <span className={`text-sm font-bold px-3 py-1 rounded-full ${conditionStyle[product.condition] || "bg-gray-100 text-gray-600"}`}>
+                {product.condition}
+              </span>
             </div>
 
+            {/* Location */}
             <div className="flex items-center gap-2 mb-4">
               <span className="text-sm text-gray-500">📍 Ships from</span>
               <span className="text-sm font-semibold text-gray-700">{product.location}</span>
@@ -209,6 +283,7 @@ export default function ProductDetail() {
               </button>
             </div>
 
+            {/* Buyer Protection */}
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
               <p className="text-xs font-black text-emerald-800 mb-2">🔒 Buyer Protection Included</p>
               <ul className="space-y-1">
@@ -224,15 +299,26 @@ export default function ProductDetail() {
 
         {/* Description + Seller */}
         <div className="flex flex-col md:flex-row gap-6 mb-12">
+
+          {/* Description */}
           <div className="flex-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-4">
               <h3 className="text-base font-black text-gray-900 mb-3">About this item</h3>
-              <p className="text-sm text-gray-600 leading-relaxed">{product.description}</p>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                {product.description || "No description provided."}
+              </p>
             </div>
+
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
               <h3 className="text-base font-black text-gray-900 mb-4">Item Details</h3>
               <div className="divide-y divide-gray-100">
-                {product.details.map(([key, val]) => (
+                {[
+                  ["Category", product.category],
+                  ["Condition", product.condition],
+                  ["Location", product.location],
+                  ["Listed", new Date(product.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })],
+                  ["Views", `${product.views} people viewed this`],
+                ].map(([key, val]) => (
                   <div key={key} className="flex justify-between py-2.5">
                     <span className="text-sm text-gray-500 font-medium">{key}</span>
                     <span className="text-sm text-gray-800 font-semibold">{val}</span>
@@ -242,32 +328,23 @@ export default function ProductDetail() {
             </div>
           </div>
 
-          {/* Seller */}
+          {/* Seller Card */}
           <div className="w-full md:w-72 shrink-0">
             <div className="bg-white rounded-2xl border border-gray-200 p-5 sticky top-24">
               <h3 className="text-base font-black text-gray-900 mb-4">About the Seller</h3>
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center text-xl font-black">E</div>
+                <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center text-xl font-black">S</div>
                 <div>
-                  <p className="text-sm font-black text-gray-900">{product.sellerName}</p>
-                  <p className="text-xs text-gray-400">@{product.seller}</p>
+                  <p className="text-sm font-black text-gray-900">Verified Seller</p>
+                  <p className="text-xs text-gray-400">Thriftly Member</p>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                {[["⭐", product.sellerRating, "Rating"], ["📦", product.sellerSales, "Sales"], ["📅", "1yr+", "Member"]].map(([icon, val, label]) => (
-                  <div key={label as string} className="bg-gray-50 rounded-xl p-2.5 text-center border border-gray-100">
-                    <p className="text-sm">{icon as string}</p>
-                    <p className="text-sm font-black text-gray-900">{val as string | number}</p>
-                    <p className="text-xs text-gray-400">{label as string}</p>
-                  </div>
-                ))}
-              </div>
+
               <div className="flex items-center gap-1.5 mb-4">
                 <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
                 <span className="text-xs text-gray-500 font-medium">Usually responds within 1 hour</span>
               </div>
 
-              {/* Message Form */}
               {!showMessage && !messageSent && (
                 <button
                   onClick={() => setShowMessage(true)}
@@ -295,11 +372,11 @@ export default function ProductDetail() {
 
               {messageSent && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-2 text-center">
-                  <p className="text-xs font-bold text-emerald-700">✅ Message sent to seller!</p>
+                  <p className="text-xs font-bold text-emerald-700">✅ Message sent!</p>
                 </div>
               )}
 
-              <Link href={`/seller/profile`}>
+              <Link href="/seller/profile">
                 <button className="w-full border border-gray-200 text-gray-600 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition">
                   👤 View Profile
                 </button>
@@ -308,60 +385,44 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* Reviews */}
-        <section className="mb-12">
-          <div className="mb-5">
-            <h2 className="text-xl font-black text-gray-900">Reviews ({product.reviews})</h2>
-            <div className="flex items-center gap-2 mt-1">
-              <div className="flex gap-0.5">{Array(5).fill(0).map((_, i) => <span key={i} className="text-amber-400 text-sm">★</span>)}</div>
-              <span className="text-sm font-bold text-gray-700">{product.rating} out of 5</span>
+        {/* Related Products */}
+        {relatedProducts.length > 0 && (
+          <section>
+            <h2 className="text-xl font-black text-gray-900 mb-5">You might also like</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {relatedProducts.map((item) => (
+                <Link href={`/product/${item.id}`} key={item.id}>
+                  <div className="bg-white rounded-2xl border border-gray-200 hover:border-emerald-300 hover:shadow-lg transition cursor-pointer group overflow-hidden">
+                    <div className="bg-gradient-to-br from-gray-50 to-gray-100 h-36 flex items-center justify-center">
+                      <span className="text-5xl group-hover:scale-110 transition">{item.images?.[0] || "🛍️"}</span>
+                    </div>
+                    <div className="p-3">
+                      <p className="text-sm font-bold text-gray-900 mb-1 truncate">{item.name}</p>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-black text-emerald-700">₹{item.price.toLocaleString()}</span>
+                        <span className="text-xs text-gray-400 line-through">₹{item.original_price.toLocaleString()}</span>
+                      </div>
+                      <span className="text-xs bg-red-50 text-red-600 font-bold px-1.5 py-0.5 rounded-md">
+                        {Math.round(((item.original_price - item.price) / item.original_price) * 100)}% off
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
             </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {reviews.map((r) => (
-              <div key={r.name} className="bg-white rounded-2xl border border-gray-200 p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-black">{r.avatar}</div>
-                    <div>
-                      <p className="text-sm font-bold text-gray-900">{r.name}</p>
-                      <p className="text-xs text-gray-400">{r.date}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-0.5">{Array(r.rating).fill(0).map((_, i) => <span key={i} className="text-amber-400 text-xs">★</span>)}</div>
-                </div>
-                <p className="text-sm text-gray-600 leading-relaxed">{r.text}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+          </section>
+        )}
 
-        {/* Related */}
-        <section>
-          <h2 className="text-xl font-black text-gray-900 mb-5">You might also like</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {relatedProducts.map((item) => (
-              <Link href={`/product/${item.id}`} key={item.id}>
-                <div className="bg-white rounded-2xl border border-gray-200 hover:border-emerald-300 hover:shadow-lg transition cursor-pointer group overflow-hidden">
-                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 h-36 flex items-center justify-center">
-                    <span className="text-5xl group-hover:scale-110 transition">{item.emoji}</span>
-                  </div>
-                  <div className="p-3">
-                    <p className="text-sm font-bold text-gray-900 mb-1">{item.name}</p>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-black text-emerald-700">{item.price}</span>
-                      <span className="text-xs text-gray-400 line-through">{item.original}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-amber-500 font-bold">★ {item.rating}</span>
-                      <span className="text-xs bg-red-50 text-red-600 font-bold px-1.5 py-0.5 rounded-md">{item.tag}</span>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
+        {relatedProducts.length === 0 && !loading && (
+          <div className="text-center py-8">
+            <Link href="/browse">
+              <button className="px-8 py-3 border-2 border-emerald-600 text-emerald-700 font-bold text-sm rounded-xl hover:bg-emerald-50 transition">
+                Browse More Items →
+              </button>
+            </Link>
           </div>
-        </section>
+        )}
+
       </div>
 
       {/* Mobile sticky bar */}
