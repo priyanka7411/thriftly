@@ -1,29 +1,67 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements } from "@stripe/react-stripe-js";
-import StripePayment from "@/components/StripePayment";
+import { PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+
+// Stripe Payment Form Component
+function StripeForm({ onSuccess, onError, total }: { onSuccess: (id: string) => void; onError: (e: string) => void; total: number }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setLoading(true);
+    const { error, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      redirect: "if_required",
+    });
+    if (error) {
+      onError(error.message || "Payment failed");
+    } else if (paymentIntent?.status === "succeeded") {
+      onSuccess(paymentIntent.id);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <PaymentElement className="mb-4" />
+      <button
+        type="submit"
+        disabled={!stripe || loading}
+        className="w-full bg-emerald-600 text-white py-4 rounded-2xl text-sm font-black hover:bg-emerald-700 transition disabled:opacity-50"
+      >
+        {loading ? "Processing..." : `🔒 Pay ₹${total.toLocaleString()}`}
+      </button>
+    </form>
+  );
+}
 
 export default function Checkout() {
   const { items, totalPrice, clearCart } = useCart();
   const router = useRouter();
 
-  const savings = items.reduce((sum, i) => sum + (i.original - i.price) * i.quantity, 0);
+  // Store snapshot of cart before payment
+  const [savedItems, setSavedItems] = useState<any[]>([]);
+  const [savedTotal, setSavedTotal] = useState(0);
+
   const shipping = totalPrice >= 999 ? 0 : 99;
   const total = totalPrice + shipping;
+  const savings = items.reduce((sum, i) => sum + (i.original - i.price) * i.quantity, 0);
 
-  const [step, setStep] = useState(1); // 1=details, 2=payment
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [clientSecret, setClientSecret] = useState("");
-  const [finalTotal, setFinalTotal] = useState(0);
-  const [finalItems, setFinalItems] = useState<any[]>([]);
 
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", phone: "",
@@ -32,82 +70,120 @@ export default function Checkout() {
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
+  // Pre-fill email if user is logged in
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user?.email) {
+        setForm(prev => ({ ...prev, email: data.user!.email! }));
+      }
+    });
+  }, []);
+
   const handleContinueToPayment = async () => {
-    if (!form.firstName || !form.email || !form.address1 || !form.city || !form.pin) {
-      setError("Please fill in all required fields!");
-      return;
-    }
+    setError("");
+
+    if (!form.firstName.trim()) { setError("First name is required!"); return; }
+    if (!form.email.trim()) { setError("Email is required!"); return; }
+    if (!form.address1.trim()) { setError("Address is required!"); return; }
+    if (!form.city.trim()) { setError("City is required!"); return; }
+    if (!form.pin.trim()) { setError("PIN code is required!"); return; }
     if (items.length === 0) { setError("Your cart is empty!"); return; }
 
     setLoading(true);
-    setError("");
 
     try {
+      // Save cart snapshot NOW before anything clears it
+      const currentItems = items.map(i => ({
+        id: i.id,
+        name: i.name,
+        price: i.price,
+        original: i.original,
+        emoji: i.emoji,
+        quantity: i.quantity,
+      }));
+      const currentTotal = total;
+
+      setSavedItems(currentItems);
+      setSavedTotal(currentTotal);
+
+      console.log("Saved items:", currentItems.length, "Total:", currentTotal);
+
       // Create Stripe payment intent
       const res = await fetch("/api/create-payment-intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: total }),
+        body: JSON.stringify({ amount: currentTotal }),
       });
 
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setFinalTotal(total);
-      setFinalItems([...items]);
+      if (!data.clientSecret) throw new Error("No client secret returned");
+
       setClientSecret(data.clientSecret);
       setStep(2);
     } catch (err: any) {
-      setError(err.message || "Something went wrong.");
+      setError(err.message || "Something went wrong. Try again.");
     }
 
     setLoading(false);
   };
 
   const handlePaymentSuccess = async (paymentIntentId: string) => {
-    
+    try {
+      setError("");
+      const { data: { user } } = await supabase.auth.getUser();
 
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
+      const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
 
-    const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
+      // Use saved snapshot
+      const orderTotal = savedTotal > 0 ? savedTotal : total;
+      const orderItems = savedItems.length > 0 ? savedItems : items;
 
-    const orderTotal = finalTotal > 0 ? finalTotal : total;
-    const orderItems = finalItems.length > 0 ? finalItems : items;
+      console.log("Creating order:", {
+        total: orderTotal,
+        items: orderItems.length,
+        buyer: user?.id,
+      });
 
-    console.log("Placing order:", { orderTotal, itemCount: orderItems.length });
+      if (!orderTotal || orderTotal <= 0) {
+        throw new Error("Order total is invalid");
+      }
 
-    const res = await fetch("/api/create-order", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        buyer_id: user?.id || null,
-        total_amount: Number(orderTotal),
-        shipping_address: shippingAddress,
-        payment_method: `stripe_${paymentIntentId}`,
-        items: orderItems.map(i => ({
-          id: Number(i.id),
-          quantity: Number(i.quantity),
-          price: Number(i.price),
-        })),
-      }),
-    });
+      const res = await fetch("/api/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyer_id: user?.id || null,
+          total_amount: orderTotal,
+          shipping_address: shippingAddress,
+          payment_method: `stripe_${paymentIntentId}`,
+          items: orderItems.map(i => ({
+            id: i.id,
+            quantity: i.quantity,
+            price: i.price,
+          })),
+        }),
+      });
 
-    const data = await res.json();
-    console.log("Order response:", data);
+      const data = await res.json();
+      console.log("Order API response:", data);
 
-    if (data.error) throw new Error(data.error);
+      if (data.error) throw new Error(data.error);
 
-    clearCart();
-    router.push(`/order-confirmation?orderId=${data.orderId}&total=${orderTotal}&email=${form.email}`);
-  } catch (err: any) {
-    console.error("Order error:", err);
-    setError(`Order failed: ${err.message}`);
-  }
-};
-  if (items.length === 0) {
+      clearCart();
+      router.push(`/order-confirmation?orderId=${data.orderId}&total=${orderTotal}&email=${encodeURIComponent(form.email)}`);
+
+    } catch (err: any) {
+      console.error("Order creation failed:", err);
+      setError(`Order failed: ${err.message}. Your payment was taken — contact support with payment ID: ${paymentIntentId}`);
+    }
+  };
+
+  // Redirect if cart empty and not in payment step
+  if (items.length === 0 && step === 1) {
     return (
       <div className="min-h-screen bg-gray-50 font-sans">
         <header className="bg-white border-b border-gray-200">
@@ -123,12 +199,21 @@ export default function Checkout() {
           <div className="text-6xl mb-4">🛒</div>
           <h2 className="text-2xl font-black text-gray-900 mb-4">Your cart is empty</h2>
           <Link href="/browse">
-            <button className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition">Browse Items</button>
+            <button className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition">
+              Browse Items
+            </button>
           </Link>
         </div>
       </div>
     );
   }
+
+  // Display items — use saved snapshot on step 2
+  const displayItems = step === 2 && savedItems.length > 0 ? savedItems : items;
+  const displayTotal = step === 2 && savedTotal > 0 ? savedTotal : total;
+  const displaySavings = step === 2 && savedItems.length > 0
+    ? savedItems.reduce((sum, i) => sum + (i.original - i.price) * i.quantity, 0)
+    : savings;
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
@@ -146,16 +231,16 @@ export default function Checkout() {
       <div className="bg-white border-b border-gray-100 py-4">
         <div className="max-w-4xl mx-auto px-6 flex items-center justify-center gap-2">
           {[
-            { step: 1, label: "Details", done: step > 1 },
-            { step: 2, label: "Payment", done: false, active: step === 2 },
-            { step: 3, label: "Confirm", done: false },
+            { num: 1, label: "Details" },
+            { num: 2, label: "Payment" },
+            { num: 3, label: "Confirm" },
           ].map((s, i) => (
-            <div key={s.step} className="flex items-center gap-2">
+            <div key={s.num} className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${s.done ? "bg-emerald-600 text-white" : s.active ? "bg-gray-900 text-white" : step === s.step ? "bg-gray-900 text-white" : "bg-gray-200 text-gray-400"}`}>
-                  {s.done ? "✓" : s.step}
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${step > s.num ? "bg-emerald-600 text-white" : step === s.num ? "bg-gray-900 text-white" : "bg-gray-200 text-gray-400"}`}>
+                  {step > s.num ? "✓" : s.num}
                 </div>
-                <span className={`text-xs font-semibold ${s.done ? "text-emerald-600" : step === s.step ? "text-gray-900" : "text-gray-400"}`}>{s.label}</span>
+                <span className={`text-xs font-semibold ${step > s.num ? "text-emerald-600" : step === s.num ? "text-gray-900" : "text-gray-400"}`}>{s.label}</span>
               </div>
               {i < 2 && <span className="text-gray-300 text-xs mx-1">——</span>}
             </div>
@@ -175,7 +260,7 @@ export default function Checkout() {
           {/* Left */}
           <div className="flex-1">
 
-            {/* Step 1 — Details */}
+            {/* Step 1 */}
             {step === 1 && (
               <div className="space-y-5">
                 <div className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -268,41 +353,35 @@ export default function Checkout() {
                   disabled={loading}
                   className="w-full bg-emerald-600 text-white py-4 rounded-2xl text-sm font-black hover:bg-emerald-700 transition disabled:opacity-50"
                 >
-                  {loading ? "Processing..." : "Continue to Payment →"}
+                  {loading ? "⏳ Processing..." : "Continue to Payment →"}
                 </button>
               </div>
             )}
 
-            {/* Step 2 — Stripe Payment */}
+            {/* Step 2 — Payment */}
             {step === 2 && clientSecret && (
               <div className="bg-white rounded-2xl border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="text-base font-black text-gray-900">Payment</h2>
                   <button onClick={() => setStep(1)} className="text-xs text-emerald-600 font-semibold hover:underline">← Back</button>
                 </div>
-
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-5 flex items-center gap-2">
-                  <span className="text-emerald-600">🔒</span>
+                  <span>🔒</span>
                   <p className="text-xs text-emerald-700 font-semibold">Your payment is secured by Stripe with 256-bit SSL encryption</p>
                 </div>
-
                 <Elements
                   stripe={stripePromise}
                   options={{
                     clientSecret,
-                    appearance: {
-                      theme: "stripe",
-                      variables: { colorPrimary: "#059669" },
-                    },
+                    appearance: { theme: "stripe", variables: { colorPrimary: "#059669" } },
                   }}
                 >
-                  <StripePayment
-                    total={total}
+                  <StripeForm
+                    total={displayTotal}
                     onSuccess={handlePaymentSuccess}
                     onError={(err) => setError(err)}
                   />
                 </Elements>
-
                 <p className="text-center text-xs text-gray-400 mt-4">
                   Test card: <span className="font-mono font-bold">4242 4242 4242 4242</span> · Any future date · Any CVV
                 </p>
@@ -314,45 +393,42 @@ export default function Checkout() {
           <div className="w-full lg:w-80 shrink-0">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-24">
               <h2 className="text-base font-black text-gray-900 mb-4">Order Summary</h2>
-
               <div className="space-y-3 mb-4 max-h-52 overflow-y-auto">
-                {items.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-xl shrink-0">{item.emoji}</div>
+                {displayItems.map((item, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-xl shrink-0">
+                      {item.emoji}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-gray-800 truncate">{item.name}</p>
                       <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
                     </div>
-                    <span className="text-xs font-black text-emerald-700 shrink-0">₹{(item.price * item.quantity).toLocaleString()}</span>
+                    <span className="text-xs font-black text-emerald-700 shrink-0">
+                      ₹{(item.price * item.quantity).toLocaleString()}
+                    </span>
                   </div>
                 ))}
               </div>
-
               <div className="border-t border-gray-100 pt-4 space-y-2.5 mb-4">
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">Subtotal</span>
-                  <span className="text-sm font-semibold">₹{totalPrice.toLocaleString()}</span>
+                  <span className="text-sm font-semibold">₹{(displayTotal - (displayTotal >= 999 ? 0 : 99)).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">Savings</span>
-                  <span className="text-sm font-bold text-emerald-600">−₹{savings.toLocaleString()}</span>
+                  <span className="text-sm font-bold text-emerald-600">−₹{displaySavings.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">Shipping</span>
-                  <span className={`text-sm font-bold ${shipping === 0 ? "text-emerald-600" : "text-gray-900"}`}>
-                    {shipping === 0 ? "FREE 🎉" : `₹${shipping}`}
-                  </span>
+                  <span className="text-sm font-bold text-emerald-600">FREE 🎉</span>
                 </div>
               </div>
-
               <div className="border-t border-gray-100 pt-4 mb-5">
                 <div className="flex justify-between">
                   <span className="text-base font-black text-gray-900">Total</span>
-                  <span className="text-base font-black text-gray-900">₹{total.toLocaleString()}</span>
+                  <span className="text-base font-black text-gray-900">₹{displayTotal.toLocaleString()}</span>
                 </div>
-                <p className="text-xs text-emerald-600 font-semibold mt-1">🎉 Saving ₹{savings.toLocaleString()}!</p>
               </div>
-
               <div className="bg-gray-50 rounded-xl p-3 space-y-1.5 border border-gray-100">
                 {["🔒 256-bit SSL Encryption", "✅ Verified Sellers", "↩️ 7-day Return Policy", "💬 24/7 Support"].map(t => (
                   <p key={t} className="text-xs text-gray-500">{t}</p>
