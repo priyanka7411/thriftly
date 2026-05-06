@@ -93,29 +93,53 @@ const handleContinueToPayment = async () => {
   if (items.length === 0) { setError("Your cart is empty!"); return; }
 
   // Calculate total DIRECTLY from items — don't trust totalPrice variable
-  const calculatedSubtotal = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
-  const calculatedShipping = calculatedSubtotal >= 999 ? 0 : 99;
-  const calculatedTotal = calculatedSubtotal + calculatedShipping;
+  const calculatedSubtotal = items.reduce(
+  (sum, i) =>
+    sum +
+    (Number(i.price) || 0) *
+    (Number(i.quantity) || 0),
+  0
+);
+
+const calculatedShipping =
+  form.delivery === "express"
+    ? 149
+    : form.delivery === "overnight"
+    ? 299
+    : calculatedSubtotal >= 999
+    ? 0
+    : 99;
+
+const calculatedTotal = calculatedSubtotal + calculatedShipping;
+
+console.log("Checkout Debug");
+console.log("Items:", items);
+console.log("Subtotal:", calculatedSubtotal);
+console.log("Shipping:", calculatedShipping);
+console.log("Total:", calculatedTotal);
 
   console.log("Items:", items.length, "Subtotal:", calculatedSubtotal, "Total:", calculatedTotal);
 
-  if (!calculatedTotal || calculatedTotal <= 0) {
-    setError("Cart total is invalid. Please go back to cart.");
-    return;
-  }
+  if (
+  typeof calculatedTotal !== "number" ||
+  isNaN(calculatedTotal) ||
+  calculatedTotal <= 0
+) {
+  setError("Cart total is invalid. Please go back to cart.");
+  return;
+}
 
   setLoading(true);
 
   try {
     const currentItems = items.map(i => ({
-      id: i.id,
-      name: i.name,
-      price: i.price,
-      original: i.original,
-      emoji: i.emoji,
-      quantity: i.quantity,
-    }));
-
+  id: i.id,
+  name: i.name,
+  price: Number(i.price) || 0,
+  original: Number(i.original) || 0,
+  emoji: i.emoji,
+  quantity: Number(i.quantity) || 0,
+}));
     setSavedItems(currentItems);
     setSavedTotal(calculatedTotal);
 
@@ -155,9 +179,13 @@ const handleContinueToPayment = async () => {
         buyer: user?.id,
       });
 
-      if (!orderTotal || orderTotal <= 0) {
-        throw new Error("Order total is invalid");
-      }
+      if (
+  typeof orderTotal !== "number" ||
+  isNaN(orderTotal) ||
+  orderTotal <= 0
+) {
+  throw new Error("Order total is invalid");
+}
 
       const res = await fetch("/api/create-order", {
         method: "POST",
@@ -167,11 +195,12 @@ const handleContinueToPayment = async () => {
           total_amount: orderTotal,
           shipping_address: shippingAddress,
           payment_method: `stripe_${paymentIntentId}`,
+          
           items: orderItems.map(i => ({
-            id: i.id,
-            quantity: i.quantity,
-            price: i.price,
-          })),
+  id: i.id,
+  quantity: Number(i.quantity) || 0,
+  price: Number(i.price) || 0,
+})),
         }),
       });
 
