@@ -1,32 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import Stripe from "stripe";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const stripe = new Stripe(
+  process.env.STRIPE_SECRET_KEY!,
+  {
+    apiVersion: "2026-04-22.dahlia",
+  }
 );
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    console.log("Received body:", body);
+    console.log("Received Body:", body);
 
-    const {
-      buyer_id,
-      total_amount,
-      shipping_address,
-      payment_method,
-      items,
-    } = body;
+    const amount = Number(body.amount);
 
-    const parsedTotal = Number(total_amount);
+    console.log("Parsed Amount:", amount);
 
-    // VALIDATION
+    // SAFE VALIDATION
     if (
-      typeof parsedTotal !== "number" ||
-      isNaN(parsedTotal) ||
-      parsedTotal <= 0
+      typeof amount !== "number" ||
+      isNaN(amount) ||
+      amount <= 0
     ) {
       return NextResponse.json(
         {
@@ -38,113 +34,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // CREATE ORDER
-    const { data: order, error: orderError } =
-      await supabase
-        .from("orders")
-        .insert({
-          buyer_id: buyer_id || null,
-          total_amount: parsedTotal,
-          shipping_address:
-            shipping_address || "Not provided",
-          payment_method:
-            payment_method || "stripe",
-          payment_status: "paid",
-          delivery_status: "processing",
-        })
-        .select()
-        .single();
+    // STRIPE PAYMENT INTENT
+    const paymentIntent =
+      await stripe.paymentIntents.create({
+        amount: Math.round(amount * 100),
+        currency: "inr",
 
-    if (orderError) {
-      console.error(
-        "ORDER INSERT ERROR:",
-        orderError
-      );
-
-      return NextResponse.json(
-        {
-          error: orderError.message,
+        automatic_payment_methods: {
+          enabled: true,
         },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    console.log("Created Order:", order);
-
-    // INSERT ORDER ITEMS
-    if (
-      items &&
-      Array.isArray(items) &&
-      items.length > 0
-    ) {
-      const orderItems = items.map(
-        (item: any) => ({
-          order_id: order.id,
-
-          product_id:
-            item.id?.toString() || null,
-
-          quantity:
-            Number(item.quantity) || 1,
-
-          price:
-            Number(item.price) || 0,
-        })
-      );
-
-      console.log(
-        "Order Items Payload:",
-        orderItems
-      );
-
-      const {
-        data: insertedItems,
-        error: itemsError,
-      } = await supabase
-        .from("order_items")
-        .insert(orderItems)
-        .select();
-
-      if (itemsError) {
-        console.error(
-          "ORDER ITEMS ERROR:",
-          itemsError
-        );
-
-        return NextResponse.json(
-          {
-            error: itemsError.message,
-          },
-          {
-            status: 500,
-          }
-        );
-      }
-
-      console.log(
-        "Inserted Items:",
-        insertedItems
-      );
-    }
+      });
 
     return NextResponse.json({
-      success: true,
-      orderId: order.id,
+      clientSecret: paymentIntent.client_secret,
     });
 
   } catch (error: any) {
-    console.error(
-      "CREATE ORDER API ERROR:",
-      error
-    );
+    console.error("Stripe Error:", error);
 
     return NextResponse.json(
       {
         error:
           error.message ||
-          "Internal Server Error",
+          "Payment Intent Failed",
       },
       {
         status: 500,
