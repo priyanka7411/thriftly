@@ -22,6 +22,8 @@ export default function Checkout() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [finalTotal, setFinalTotal] = useState(0);
+  const [finalItems, setFinalItems] = useState<any[]>([]);
 
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", phone: "",
@@ -53,7 +55,8 @@ export default function Checkout() {
 
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-
+      setFinalTotal(total);
+      setFinalItems([...items]);
       setClientSecret(data.clientSecret);
       setStep(2);
     } catch (err: any) {
@@ -65,23 +68,26 @@ export default function Checkout() {
 
   const handlePaymentSuccess = async (paymentIntentId: string) => {
     
+
   try {
     const { data: { user } } = await supabase.auth.getUser();
 
     const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
 
-    // Log to debug
-    console.log("Placing order with total:", total, "items:", items.length);
+    const orderTotal = finalTotal > 0 ? finalTotal : total;
+    const orderItems = finalItems.length > 0 ? finalItems : items;
+
+    console.log("Placing order:", { orderTotal, itemCount: orderItems.length });
 
     const res = await fetch("/api/create-order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         buyer_id: user?.id || null,
-        total_amount: Number(total),
+        total_amount: Number(orderTotal),
         shipping_address: shippingAddress,
         payment_method: `stripe_${paymentIntentId}`,
-        items: items.map(i => ({
+        items: orderItems.map(i => ({
           id: Number(i.id),
           quantity: Number(i.quantity),
           price: Number(i.price),
@@ -95,9 +101,9 @@ export default function Checkout() {
     if (data.error) throw new Error(data.error);
 
     clearCart();
-    router.push(`/order-confirmation?orderId=${data.orderId}&total=${total}&email=${form.email}`);
+    router.push(`/order-confirmation?orderId=${data.orderId}&total=${orderTotal}&email=${form.email}`);
   } catch (err: any) {
-    console.error("Order creation error:", err);
+    console.error("Order error:", err);
     setError(`Order failed: ${err.message}`);
   }
 };
