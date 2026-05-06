@@ -64,33 +64,43 @@ export default function Checkout() {
   };
 
   const handlePaymentSuccess = async (paymentIntentId: string) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
+    
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
 
-      const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
+    const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
 
-      const res = await fetch("/api/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          buyer_id: user?.id || null,
-          total_amount: total,
-          shipping_address: shippingAddress,
-          payment_method: `stripe_${paymentIntentId}`,
-          items: items.map(i => ({ id: i.id, quantity: i.quantity, price: i.price })),
-        }),
-      });
+    // Log to debug
+    console.log("Placing order with total:", total, "items:", items.length);
 
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+    const res = await fetch("/api/create-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        buyer_id: user?.id || null,
+        total_amount: Number(total),
+        shipping_address: shippingAddress,
+        payment_method: `stripe_${paymentIntentId}`,
+        items: items.map(i => ({
+          id: Number(i.id),
+          quantity: Number(i.quantity),
+          price: Number(i.price),
+        })),
+      }),
+    });
 
-      clearCart();
-      router.push(`/order-confirmation?orderId=${data.orderId}&total=${total}&email=${form.email}`);
-    } catch (err: any) {
-      setError("Payment succeeded but order creation failed. Contact support.");
-    }
-  };
+    const data = await res.json();
+    console.log("Order response:", data);
 
+    if (data.error) throw new Error(data.error);
+
+    clearCart();
+    router.push(`/order-confirmation?orderId=${data.orderId}&total=${total}&email=${form.email}`);
+  } catch (err: any) {
+    console.error("Order creation error:", err);
+    setError(`Order failed: ${err.message}`);
+  }
+};
   if (items.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 font-sans">

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Use service role key for server-side operations
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -9,16 +8,23 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const { buyer_id, total_amount, shipping_address, payment_method, items } = await req.json();
+    const body = await req.json();
+    console.log("Received body:", body);
 
-    // Create order
+    const { buyer_id, total_amount, shipping_address, payment_method, items } = body;
+
+    // Validate required fields
+    if (!total_amount || total_amount <= 0) {
+      return NextResponse.json({ error: "Invalid total amount" }, { status: 400 });
+    }
+
     const { data: order, error: orderError } = await supabase
       .from("orders")
       .insert({
         buyer_id: buyer_id || null,
-        total_amount,
-        shipping_address,
-        payment_method,
+        total_amount: Number(total_amount),
+        shipping_address: shipping_address || "Not provided",
+        payment_method: payment_method || "stripe",
         payment_status: "paid",
         delivery_status: "processing",
       })
@@ -30,12 +36,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: orderError.message }, { status: 500 });
     }
 
-    // Create order items
     if (items && items.length > 0) {
       const orderItems = items.map((item: any) => ({
         order_id: order.id,
         product_id: item.id,
-        quantity: item.quantity,
+        quantity: item.quantity || 1,
         price: item.price,
       }));
 
@@ -43,9 +48,7 @@ export async function POST(req: NextRequest) {
         .from("order_items")
         .insert(orderItems);
 
-      if (itemsError) {
-        console.error("Items error:", itemsError);
-      }
+      if (itemsError) console.error("Items error:", itemsError);
     }
 
     return NextResponse.json({ orderId: order.id, success: true });
