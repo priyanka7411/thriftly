@@ -82,54 +82,61 @@ export default function Checkout() {
     });
   }, []);
 
-  const handleContinueToPayment = async () => {
-    setError("");
+const handleContinueToPayment = async () => {
+  setError("");
 
-    if (!form.firstName.trim()) { setError("First name is required!"); return; }
-    if (!form.email.trim()) { setError("Email is required!"); return; }
-    if (!form.address1.trim()) { setError("Address is required!"); return; }
-    if (!form.city.trim()) { setError("City is required!"); return; }
-    if (!form.pin.trim()) { setError("PIN code is required!"); return; }
-    if (items.length === 0) { setError("Your cart is empty!"); return; }
+  if (!form.firstName.trim()) { setError("First name is required!"); return; }
+  if (!form.email.trim()) { setError("Email is required!"); return; }
+  if (!form.address1.trim()) { setError("Address is required!"); return; }
+  if (!form.city.trim()) { setError("City is required!"); return; }
+  if (!form.pin.trim()) { setError("PIN code is required!"); return; }
+  if (items.length === 0) { setError("Your cart is empty!"); return; }
 
-    setLoading(true);
+  // Calculate total DIRECTLY from items — don't trust totalPrice variable
+  const calculatedSubtotal = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+  const calculatedShipping = calculatedSubtotal >= 999 ? 0 : 99;
+  const calculatedTotal = calculatedSubtotal + calculatedShipping;
 
-    try {
-      // Save cart snapshot NOW before anything clears it
-      const currentItems = items.map(i => ({
-        id: i.id,
-        name: i.name,
-        price: i.price,
-        original: i.original,
-        emoji: i.emoji,
-        quantity: i.quantity,
-      }));
-      const currentTotal = total;
+  console.log("Items:", items.length, "Subtotal:", calculatedSubtotal, "Total:", calculatedTotal);
 
-      setSavedItems(currentItems);
-      setSavedTotal(currentTotal);
+  if (!calculatedTotal || calculatedTotal <= 0) {
+    setError("Cart total is invalid. Please go back to cart.");
+    return;
+  }
 
-      console.log("Saved items:", currentItems.length, "Total:", currentTotal);
+  setLoading(true);
 
-      // Create Stripe payment intent
-      const res = await fetch("/api/create-payment-intent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: currentTotal }),
-      });
+  try {
+    const currentItems = items.map(i => ({
+      id: i.id,
+      name: i.name,
+      price: i.price,
+      original: i.original,
+      emoji: i.emoji,
+      quantity: i.quantity,
+    }));
 
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      if (!data.clientSecret) throw new Error("No client secret returned");
+    setSavedItems(currentItems);
+    setSavedTotal(calculatedTotal);
 
-      setClientSecret(data.clientSecret);
-      setStep(2);
-    } catch (err: any) {
-      setError(err.message || "Something went wrong. Try again.");
-    }
+    const res = await fetch("/api/create-payment-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: calculatedTotal }),
+    });
 
-    setLoading(false);
-  };
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (!data.clientSecret) throw new Error("No client secret returned");
+
+    setClientSecret(data.clientSecret);
+    setStep(2);
+  } catch (err: any) {
+    setError(err.message || "Something went wrong.");
+  }
+
+  setLoading(false);
+};
 
   const handlePaymentSuccess = async (paymentIntentId: string) => {
     try {
