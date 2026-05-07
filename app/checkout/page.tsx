@@ -172,9 +172,13 @@ console.log("Total:", calculatedTotal);
     const orderTotal = savedTotal > 0 ? savedTotal : total;
     const orderItems = savedItems.length > 0 ? savedItems : items;
 
-    if (!orderTotal || orderTotal <= 0) {
-      throw new Error("Order total is invalid");
-    }
+    if (
+  typeof orderTotal !== "number" ||
+  isNaN(orderTotal) ||
+  orderTotal <= 0
+) {
+  throw new Error("Order total is invalid");
+}
 
     // Create order
     const res = await fetch("/api/create-order", {
