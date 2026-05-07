@@ -163,60 +163,71 @@ console.log("Total:", calculatedTotal);
 };
 
   const handlePaymentSuccess = async (paymentIntentId: string) => {
+  try {
+    setError("");
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
+
+    const orderTotal = savedTotal > 0 ? savedTotal : total;
+    const orderItems = savedItems.length > 0 ? savedItems : items;
+
+    if (!orderTotal || orderTotal <= 0) {
+      throw new Error("Order total is invalid");
+    }
+
+    // Create order
+    const res = await fetch("/api/create-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        buyer_id: user?.id || null,
+        total_amount: orderTotal,
+        shipping_address: shippingAddress,
+        payment_method: `stripe_${paymentIntentId}`,
+        items: orderItems.map(i => ({
+          id: i.id,
+          quantity: i.quantity,
+          price: i.price,
+        })),
+      }),
+    });
+
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    // Send confirmation email
     try {
-      setError("");
-      const { data: { user } } = await supabase.auth.getUser();
-
-      const shippingAddress = `${form.firstName} ${form.lastName}, ${form.address1}${form.address2 ? ", " + form.address2 : ""}, ${form.city}, ${form.state} - ${form.pin}, ${form.country}`;
-
-      // Use saved snapshot
-      const orderTotal = savedTotal > 0 ? savedTotal : total;
-      const orderItems = savedItems.length > 0 ? savedItems : items;
-
-      console.log("Creating order:", {
-        total: orderTotal,
-        items: orderItems.length,
-        buyer: user?.id,
-      });
-
-      if (
-  typeof orderTotal !== "number" ||
-  isNaN(orderTotal) ||
-  orderTotal <= 0
-) {
-  throw new Error("Order total is invalid");
-}
-
-      const res = await fetch("/api/create-order", {
+      await fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          buyer_id: user?.id || null,
-          total_amount: orderTotal,
-          shipping_address: shippingAddress,
-          payment_method: `stripe_${paymentIntentId}`,
-          
+          to: form.email,
+          subject: `Order Confirmed! #TH-${data.orderId} 🎉`,
+          orderId: data.orderId,
+          total: orderTotal,
+          name: form.firstName,
           items: orderItems.map(i => ({
-  id: i.id,
-  quantity: Number(i.quantity) || 0,
-  price: Number(i.price) || 0,
-})),
+            name: i.name,
+            price: i.price,
+            quantity: i.quantity,
+          })),
         }),
       });
-
-      const data = await res.json();
-      console.log("Order API response:", data);
-
-      if (data.error) throw new Error(data.error);
-
-      clearCart();
-      router.push(`/order-confirmation?orderId=${data.orderId}&total=${orderTotal}&email=${encodeURIComponent(form.email)}`);
-
-    } catch (err: any) {
-      console.error("Order creation failed:", err);
-      setError(`Order failed: ${err.message}. Your payment was taken — contact support with payment ID: ${paymentIntentId}`);
+      console.log("Email sent!");
+    } catch (emailErr) {
+      // Don't fail the order if email fails
+      console.error("Email failed:", emailErr);
     }
-  };
+
+    clearCart();
+    router.push(`/order-confirmation?orderId=${data.orderId}&total=${orderTotal}&email=${encodeURIComponent(form.email)}`);
+
+  } catch (err: any) {
+    console.error("Order error:", err);
+    setError(`Order failed: ${err.message}`);
+  }
+};
 
   // Redirect if cart empty and not in payment step
   if (items.length === 0 && step === 1) {
