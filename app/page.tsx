@@ -129,18 +129,22 @@ function ProductCard({ item }: { item: Product }) {
         {/* Image */}
         <div className="relative h-52 overflow-hidden bg-gray-50">
           {imageUrl ? (
-            <Image
-              src={imageUrl}
-              alt={item.name}
-              fill
-              className="object-cover group-hover:scale-105 transition-transform duration-500"
-              sizes="(max-width: 768px) 50vw, 25vw"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
-              <Package className="w-12 h-12 text-gray-300" />
-            </div>
-          )}
+  <Image
+    src={imageUrl}
+    alt={item.name}
+    fill
+    className="object-cover group-hover:scale-105 transition-transform duration-500"
+    sizes="(max-width: 768px) 50vw, 25vw"
+  />
+) : (
+  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+    {item.images?.[0] && !item.images[0].startsWith("http") ? (
+      <span className="text-5xl">{item.images[0]}</span>
+    ) : (
+      <Package className="w-12 h-12 text-gray-300" />
+    )}
+  </div>
+)}
           {/* Badges */}
           {discount > 0 && (
             <div className="absolute top-3 right-3">
@@ -347,13 +351,17 @@ export default function Home() {
                       <Link href={`/product/${item.id}`} key={item.id}>
                         <div className={`group bg-white rounded-3xl border border-gray-100 hover:border-emerald-200 hover:shadow-xl shadow-sm transition-all duration-300 overflow-hidden cursor-pointer ${i % 2 !== 0 ? "mt-8" : ""}`}>
                           <div className="relative h-40 overflow-hidden bg-gray-50">
-                            {imageUrl ? (
-                              <Image src={imageUrl} alt={item.name} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="200px" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <Package className="w-10 h-10 text-gray-200" />
-                              </div>
-                            )}
+  {imageUrl ? (
+    <Image src={imageUrl} alt={item.name} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="200px" />
+  ) : (
+    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+      {item.images?.[0] && !item.images[0].startsWith("http") ? (
+        <span className="text-5xl">{item.images[0]}</span>
+      ) : (
+        <Package className="w-10 h-10 text-gray-200" />
+      )}
+    </div>
+  )}
                             {discountPercent(item.price, item.original_price) > 0 && (
                               <span className="absolute top-2.5 right-2.5 bg-red-500 text-white text-xs font-black px-2 py-0.5 rounded-lg">
                                 -{discountPercent(item.price, item.original_price)}%
