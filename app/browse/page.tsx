@@ -439,7 +439,7 @@ function BrowseContent() {
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 12;
 
-  const searchTimerRef = useRef<NodeJS.Timeout>();
+  const searchTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   // ── Fetch ─────────────────────────────────────────────────────────────
   const fetchProducts = useCallback(async () => {
